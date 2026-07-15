@@ -308,6 +308,113 @@ void SaveBotConversationHistoryToDB()
     CharacterDatabase.Execute(SafeFormat(cleanupQuery, g_MaxConversationHistory));
 }
 
+// [CHAT_COOLDOWN] Count bots in the same grid cell
+static uint32_t CountBotsInGrid(uint32_t mapId, int32_t gridX, int32_t gridY)
+{
+    uint32_t count = 0;
+    auto const& allPlayers = ObjectAccessor::GetPlayers();
+    for (auto const& itr : allPlayers)
+    {
+        Player* p = itr.second;
+        if (!p || !p->IsInWorld() || p->GetMapId() != mapId)
+            continue;
+        PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(p);
+        if (!ai || !ai->IsBotAI())
+            continue;
+        if (int32_t(p->GetPositionX() / GRID_SIZE) == gridX &&
+            int32_t(p->GetPositionY() / GRID_SIZE) == gridY)
+        {
+            ++count;
+        }
+    }
+    return count;
+}
+
+// [CHAT_COOLDOWN] Layer 3: check if bot is past its self cooldown
+static bool CanSpeakSelf(Player* bot)
+{
+    std::lock_guard<std::mutex> lock(g_BotCooldownMutex);
+    auto it = g_BotSelfCooldowns.find(bot->GetGUID().GetCounter());
+    if (it == g_BotSelfCooldowns.end())
+        return true;
+    return getMSTime() >= it->second;
+}
+
+// [CHAT_COOLDOWN] Layer 2: check if grid has room for another active speaker
+static bool CanSpeakInGrid(Player* bot)
+{
+    uint32_t mapId = bot->GetMapId();
+    int32_t gridX = int32_t(bot->GetPositionX() / GRID_SIZE);
+    int32_t gridY = int32_t(bot->GetPositionY() / GRID_SIZE);
+    uint64_t gridKey = (uint64_t(mapId) << 32) | (uint32_t(gridX) << 16) | uint32_t(gridY);
+
+    std::lock_guard<std::mutex> lock(g_GridActiveMutex);
+    auto& grid = g_GridActive[gridKey];
+
+    // Cleanup expired entries
+    uint32_t now = getMSTime();
+    while (!grid.speakers.empty() && now - grid.speakers.front().second > BOT_SELF_COOLDOWN_MAX)
+    {
+        grid.speakers.pop_front();
+    }
+
+    // Same bot already in active list, allow
+    uint64_t botGuidRaw = bot->GetGUID().GetRawValue();
+    for (auto& [guid, ts] : grid.speakers)
+    {
+        if (guid == botGuidRaw)
+            return true;
+    }
+
+    // Calculate limit
+    uint32_t totalInGrid = CountBotsInGrid(mapId, gridX, gridY);
+    uint32_t limit = (totalInGrid * MAX_ACTIVE_PERCENT) / 100;
+    limit = std::max<uint32_t>(MIN_ACTIVE_SPEAKERS, std::min<uint32_t>(limit, MAX_ACTIVE_SPEAKERS));
+
+    if (grid.speakers.size() >= limit)
+        return false;
+
+    return true;
+}
+
+// [CHAT_COOLDOWN] Record bot spoke: update self cooldown and grid active list
+static void RecordBotSpeak(Player* bot)
+{
+    uint32_t now = getMSTime();
+    uint32_t cooldownUntil = now + BOT_SELF_COOLDOWN + urand(0, BOT_SELF_COOLDOWN_JITTER);
+    uint64_t botGuidRaw = bot->GetGUID().GetRawValue();
+
+    // Layer 3: self cooldown
+    {
+        std::lock_guard<std::mutex> lock(g_BotCooldownMutex);
+        g_BotSelfCooldowns[bot->GetGUID().GetCounter()] = cooldownUntil;
+    }
+
+    // Layer 2: grid active
+    {
+        uint32_t mapId = bot->GetMapId();
+        int32_t gridX = int32_t(bot->GetPositionX() / GRID_SIZE);
+        int32_t gridY = int32_t(bot->GetPositionY() / GRID_SIZE);
+        uint64_t gridKey = (uint64_t(mapId) << 32) | (uint32_t(gridX) << 16) | uint32_t(gridY);
+
+        std::lock_guard<std::mutex> lock(g_GridActiveMutex);
+        auto& grid = g_GridActive[gridKey];
+        grid.speakers.push_back({botGuidRaw, now});
+
+        // Cleanup expired
+        while (!grid.speakers.empty() && now - grid.speakers.front().second > BOT_SELF_COOLDOWN_MAX)
+        {
+            grid.speakers.pop_front();
+        }
+    }
+
+    if (g_DebugEnabled)
+    {
+        LOG_INFO("server.loading", "[CHAT_COOLDOWN] Bot {} recorded speak, cooldown until {} (+{}ms)",
+                 bot->GetName(), cooldownUntil, cooldownUntil - now);
+    }
+}
+
 // Called when a bot sends a message (random chatter or other bot-initiated messages)
 // This triggers other bots to potentially reply
 void ProcessBotChatMessage(Player* bot, const std::string& msg, ChatChannelSourceLocal sourceLocal, Channel* channel)
@@ -458,6 +565,9 @@ void ProcessBotChatMessage(Player* bot, const std::string& msg, ChatChannelSourc
     
     // Call the main ProcessChat function with bot as sender
     PlayerBotChatHandler::ProcessChat(bot, type, lang, mutableMsg, sourceLocal, channel, nullptr);
+
+    // [CHAT_COOLDOWN] Record that this bot spoke
+    RecordBotSpeak(bot);
 }
 
 std::string GetBotHistoryPrompt(uint64_t botGuid, uint64_t playerGuid, std::string playerMessage)
@@ -1339,6 +1449,20 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                 uint32_t roll = urand(0, 99);
                 if (roll < chance)
                 {
+                    // [CHAT_COOLDOWN] Layer 3: self cooldown
+                    if (!CanSpeakSelf(bot))
+                    {
+                        if (g_DebugEnabled)
+                            LOG_INFO("server.loading", "[CHAT_COOLDOWN] Bot {} self-cooldown, skipping", bot->GetName());
+                        continue;
+                    }
+                    // [CHAT_COOLDOWN] Layer 2: grid active limit
+                    if (!CanSpeakInGrid(bot))
+                    {
+                        if (g_DebugEnabled)
+                            LOG_INFO("server.loading", "[CHAT_COOLDOWN] Bot {} grid full, skipping", bot->GetName());
+                        continue;
+                    }
                     finalCandidates.push_back(bot);
                     if(g_DebugEnabled)
                     {

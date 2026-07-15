@@ -707,6 +707,18 @@ void OllamaBotRandomChatter::HandleRandomChatter()
 
             uint64_t botGuid = bot->GetGUID().GetRawValue();
 
+            // [CHAT_COOLDOWN] Layer 3: self cooldown check before random chatter
+            {
+                std::lock_guard<std::mutex> lock(g_BotCooldownMutex);
+                auto it = g_BotSelfCooldowns.find(bot->GetGUID().GetCounter());
+                if (it != g_BotSelfCooldowns.end() && getMSTime() < it->second)
+                {
+                    if (g_DebugEnabled)
+                        LOG_INFO("server.loading", "[CHAT_COOLDOWN] Bot {} self-cooldown, skipping random chatter", bot->GetName());
+                    continue;
+                }
+            }
+
             std::thread([botGuid, prompt, isGuildComment]() {
                 try {
                     Player* botPtr = ObjectAccessor::FindPlayer(ObjectGuid(botGuid));
