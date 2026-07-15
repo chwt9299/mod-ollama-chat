@@ -279,6 +279,33 @@ extern uint32_t g_TypingSimulationBaseDelay;      // Base delay in milliseconds
 extern uint32_t g_TypingSimulationDelayPerChar;   // Delay per character in milliseconds
 
 // --------------------------------------------
+// Chat Cooldown System (Layer 2 & 3)
+// --------------------------------------------
+// Layer 3: Bot self cooldown constants (ms)
+constexpr uint32_t BOT_SELF_COOLDOWN        = 10000;
+constexpr uint32_t BOT_SELF_COOLDOWN_JITTER  = 10000;
+constexpr uint32_t BOT_SELF_COOLDOWN_MAX     = BOT_SELF_COOLDOWN + BOT_SELF_COOLDOWN_JITTER;
+
+// Layer 2: Grid active speakers constants
+constexpr float    GRID_SIZE                 = 80.0f;
+constexpr uint32_t MAX_ACTIVE_PERCENT        = 15;
+constexpr uint32_t MIN_ACTIVE_SPEAKERS       = 2;
+constexpr uint32_t MAX_ACTIVE_SPEAKERS       = 8;
+
+// Layer 3: Bot self cooldown map (key = GUID counter, value = cooldownUntil ms)
+extern std::unordered_map<uint32_t, uint32_t> g_BotSelfCooldowns;
+extern std::mutex g_BotCooldownMutex;
+
+// Layer 2: Grid active speakers
+struct GridActiveSpeakers
+{
+    std::deque<std::pair<uint64_t, uint32_t>> speakers;  // <guid raw, speak timestamp ms>
+};
+// key = (mapId << 32) | (gridX << 16) | gridY
+extern std::unordered_map<uint64_t, GridActiveSpeakers> g_GridActive;
+extern std::mutex g_GridActiveMutex;
+
+// --------------------------------------------
 // Loader Functions
 // --------------------------------------------
 void LoadOllamaChatConfig();

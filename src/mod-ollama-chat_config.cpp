@@ -278,6 +278,14 @@ bool g_EnableTypingSimulation = false;
 uint32_t g_TypingSimulationBaseDelay = 1000;     // 1000ms base delay
 uint32_t g_TypingSimulationDelayPerChar = 250;   // 250ms per character (4 chars/sec)
 
+// --------------------------------------------
+// Chat Cooldown System
+// --------------------------------------------
+std::unordered_map<uint32_t, uint32_t> g_BotSelfCooldowns;
+std::mutex g_BotCooldownMutex;
+std::unordered_map<uint64_t, GridActiveSpeakers> g_GridActive;
+std::mutex g_GridActiveMutex;
+
 
 static std::vector<std::string> SplitString(const std::string& str, char delim)
 {
