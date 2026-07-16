@@ -1915,6 +1915,11 @@ static bool IsBotEligibleForChatChannelLocal(Player* bot, Player* player, ChatCh
             // For channels like General, Trade, etc., no distance check - only channel membership matters
             // Channel membership was already checked above
             return true;
+
+        case SRC_UNDEFINED_LOCAL:
+            // Bot-initiated messages: eligibleBots already passes all bots through,
+            // so candidate stage should also pass them through to reach cooldown and chance checks
+            return true;
             
         default:
             return false;
