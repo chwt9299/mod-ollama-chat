@@ -13,6 +13,7 @@
 #include "World.h"
 #include "AiFactory.h"
 #include "ChannelMgr.h"
+#include <unordered_set>
 #include <sstream>
 #include <vector>
 #include <fmt/core.h>
@@ -381,8 +382,26 @@ static bool CanSpeakInGrid(Player* bot)
 static void RecordBotSpeak(Player* bot)
 {
     uint32_t now = getMSTime();
-    uint32_t cooldownUntil = now + BOT_SELF_COOLDOWN + urand(0, BOT_SELF_COOLDOWN_JITTER);
+    uint32_t botGuidCounter = bot->GetGUID().GetCounter();
     uint64_t botGuidRaw = bot->GetGUID().GetRawValue();
+
+    // Check if triggered by mention → use shorter cooldown
+    bool isMention = false;
+    {
+        std::lock_guard<std::mutex> lock(g_MentionTriggeredMutex);
+        auto it = g_MentionTriggeredBots.find(botGuidCounter);
+        if (it != g_MentionTriggeredBots.end())
+        {
+            isMention = true;
+            g_MentionTriggeredBots.erase(it);
+        }
+    }
+
+    uint32_t cooldownUntil;
+    if (isMention)
+        cooldownUntil = now + BOT_MENTION_COOLDOWN + urand(0, BOT_MENTION_COOLDOWN_JITTER);
+    else
+        cooldownUntil = now + BOT_SELF_COOLDOWN + urand(0, BOT_SELF_COOLDOWN_JITTER);
 
     // Layer 3: self cooldown
     {
@@ -1418,23 +1437,38 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             }
         }
 
+        bool mentionHandled = false;
         if (!mentionedBots.empty())
         {
-            // Sort by position to get the first mentioned bot
+            // Sort by position to pick the earliest mentioned bot
             std::sort(mentionedBots.begin(), mentionedBots.end(),
                       [](const std::pair<size_t, Player*> &a, const std::pair<size_t, Player*> &b) { return a.first < b.first; });
-            Player* chosen = mentionedBots.front().second;
-            if (!(g_DisableRepliesInCombat && chosen->IsInCombat()))
+            for (auto& [pos, bot] : mentionedBots)
             {
-                finalCandidates.push_back(chosen);
-                if(g_DebugEnabled)
+                if (g_DisableRepliesInCombat && bot->IsInCombat())
+                    continue;
+                // [CHAT_COOLDOWN] Layer 3: self cooldown applies to mentions too
+                if (!CanSpeakSelf(bot))
                 {
-                    LOG_INFO("server.loading", "[Ollama Chat] Bot {} selected (mentioned first at position {})", 
-                            chosen->GetName(), mentionedBots.front().first);
+                    if (g_DebugEnabled)
+                        LOG_INFO("server.loading", "[CHAT_COOLDOWN] Mentioned bot {} self-cooldown, trying next", bot->GetName());
+                    continue;
                 }
+                // Mark as mention-triggered for shorter post-speak cooldown
+                {
+                    std::lock_guard<std::mutex> lock(g_MentionTriggeredMutex);
+                    g_MentionTriggeredBots.insert(bot->GetGUID().GetCounter());
+                }
+                finalCandidates.push_back(bot);
+                mentionHandled = true;
+                if (g_DebugEnabled)
+                    LOG_INFO("server.loading", "[Ollama Chat] Bot {} selected (mentioned at position {})",
+                            bot->GetName(), pos);
+                break;
             }
         }
-        else
+
+        if (!mentionHandled)
         {
             for (Player* bot : candidateBots)
             {

@@ -283,6 +283,8 @@ uint32_t g_TypingSimulationDelayPerChar = 250;   // 250ms per character (4 chars
 // --------------------------------------------
 std::unordered_map<uint32_t, uint32_t> g_BotSelfCooldowns;
 std::mutex g_BotCooldownMutex;
+std::unordered_set<uint32_t> g_MentionTriggeredBots;
+std::mutex g_MentionTriggeredMutex;
 std::unordered_map<uint64_t, GridActiveSpeakers> g_GridActive;
 std::mutex g_GridActiveMutex;
 
