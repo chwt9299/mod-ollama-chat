@@ -1217,7 +1217,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                                 if (guildMember && guildMember->GetGuildId() == candidate->GetGuildId())
                                 {
                                     PlayerbotAI* memberAI = PlayerbotsMgr::instance().GetPlayerbotAI(guildMember);
-                                    if (!memberAI || !memberAI->IsBotAI())
+                                    if (!memberAI || !memberAI->IsBotAI() || memberAI->IsBotAiMode())
                                     {
                                         hasRealPlayerInGuild = true;
                                         break;
@@ -1241,7 +1241,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                                 if (member)
                                 {
                                     PlayerbotAI* memberAI = PlayerbotsMgr::instance().GetPlayerbotAI(member);
-                                    if (!memberAI || !memberAI->IsBotAI())
+                                    if (!memberAI || !memberAI->IsBotAI() || memberAI->IsBotAiMode())
                                     {
                                         hasRealPlayerInGroup = true;
                                         break;
@@ -1266,7 +1266,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                                 if (nearbyPlayer && nearbyPlayer->IsInWorld())
                                 {
                                     PlayerbotAI* nearbyAI = PlayerbotsMgr::instance().GetPlayerbotAI(nearbyPlayer);
-                                    if (!nearbyAI || !nearbyAI->IsBotAI())
+                                    if (!nearbyAI || !nearbyAI->IsBotAI() || nearbyAI->IsBotAiMode())
                                     {
                                         if (candidate->GetDistance(nearbyPlayer) <= threshold)
                                         {

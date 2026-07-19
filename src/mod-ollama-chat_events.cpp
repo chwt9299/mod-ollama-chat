@@ -71,14 +71,15 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
         }
     }
 
-    // Check for nearby real players (original logic)
+    // Check for nearby real players (including AI-mode bots, i.e. player's own AI-controlled characters)
     for (auto const& pair : source->GetMap()->GetPlayers())
     {
         Player* player = pair.GetSource();
         if (player == source)
             continue;
 
-        if (!PlayerbotsMgr::instance().GetPlayerbotAI(player) && player->IsWithinDist(source, g_EventChatterRealPlayerDistance, false))
+        PlayerbotAI* nearbyAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
+        if ((!nearbyAI || !nearbyAI->IsBotAI() || nearbyAI->IsBotAiMode()) && player->IsWithinDist(source, g_EventChatterRealPlayerDistance, false))
         {
             hasNearbyRealPlayer = true;
             break;
