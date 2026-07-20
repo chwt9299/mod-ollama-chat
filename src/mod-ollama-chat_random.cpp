@@ -86,7 +86,8 @@ void OllamaBotRandomChatter::HandleRandomChatter()
     {
         Player* player = itr.second;
         if (!player->IsInWorld()) continue;
-        if (!PlayerbotsMgr::instance().GetPlayerbotAI(player))
+        PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(player);
+        if (!ai || !ai->IsBotAI() || ai->IsBotAiMode())
             realPlayers.push_back(player);
     }
 
